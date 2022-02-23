@@ -1,0 +1,118 @@
+---
+- name: Adding ssh key to root user
+  hosts: linuxfondation
+  remote_user: admin
+
+  tasks:
+    - name: Adding ssh key to root user
+      command: sudo cp /home/admin/.ssh/authorized_keys /root/.ssh/authorized_keys
+
+- name: Configuring the server using root login
+  hosts: linuxfondation
+  remote_user: root
+  vars:
+    swap_file_path: "/opt/swapfile"
+    swap_file_size_mb: 1024
+
+  tasks:
+    - name: Updating and upgrading packages ...
+      apt:
+        upgrade: yes
+        update_cache: yes
+
+    - name: Install packages ...
+      apt:
+        update_cache: yes
+        name:
+          - python3
+          - python3-pip
+          - htop
+          - whois
+          - curl
+          - docker.io
+
+    - name: Install pexpect ...
+      pip:
+        name: pexpect
+
+    - name: Generate password hash
+      ansible.builtin.expect:
+        command: mkpasswd --method=sha-512
+        responses:
+          (?i)password: "root_pwd"
+      register: password_hash
+
+    - name: Change password for root user
+      become: true
+      user:
+        name: root
+        password: "{{ password_hash.stdout_lines[-1] }}"
+
+    - name: Add Kubernetes apt key
+      ansible.builtin.apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+
+    - name: Add kubernetes repo
+      ansible.builtin.apt_repository:
+        repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
+        filename: kubernetes
+
+    - name: Update & install kubernetes ...
+      apt:
+        update_cache: yes
+        name:
+          - kubeadm
+          - kubelet
+          - kubectl
+
+    - name: Get private IP ...
+      shell: ifconfig eth0 | grep "inet " | awk '{ print $2 }'
+      register: cp_ip
+
+    - name: Add to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: '{{ cp_ip.stdout }} k8scp'
+
+    - name: Modifying ssh_config file
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        line: 'PermitRootLogin without-password'
+
+    - name: Modifying .bashrc file
+      lineinfile:
+        path: /root/.bashrc
+        line: "{{ item }}"
+      loop:
+        - 'alias l="ls --color=auto"'
+        - 'alias ll="ls -l --color=auto"'
+        - 'alias lll="ls -la --color=auto"'
+
+    - name: Create vim config file
+      command: touch /root/.vimrc
+      args:
+        creates: /root/.vimrc
+    
+    - name: Modifying .vimrc file
+      lineinfile:
+        path: /root/.vimrc
+        line: "{{ item }}"
+      loop:
+        - "set encoding=utf-8"
+        - "set nu"
+        - "syntax on"
+        - "set cursorline"
+        - "set autoindent"
+        - "set smartindent"
+        - "set list listchars=tab:▸\\ ,trail:·"
+        - "set tabstop=2"
+        - "set shiftwidth=2"
+
+    - name: Generate SSH key ED25519
+      community.crypto.openssh_keypair:
+        path: /root/.ssh/id_ed25519
+        type: ed25519
+
+    - name: Set TimeZone
+      community.general.timezone:
+        name: Europe/Paris
