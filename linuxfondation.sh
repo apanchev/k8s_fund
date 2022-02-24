@@ -14,12 +14,12 @@ select choice in "${choices[@]}"; do
       sp="/-\|"
       counter=0
       printf "Waiting for AWS instances to be available ...  "
-      until [ $counter -gt 500000 ]
+      until [ $counter -gt 2000000 ]
       do
         printf "\b${sp:i++%${#sp}:1}"
         ((counter++))
       done
-      ansible-playbook -i ansible_hosts ansible_playbook_config.yml
+      ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i ansible_hosts ansible_playbook_config.yml
       exit
       ;;
     "Destroy intances")
@@ -29,7 +29,7 @@ select choice in "${choices[@]}"; do
       ;;
     "Launch Ansible config")
       cd ansible
-      ansible-playbook -i ansible_hosts ansible_playbook_config.yml
+      ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i ansible_hosts ansible_playbook_config.yml
       exit
       ;;
     *) echo "Invalid option please select between 1 and 2";;
