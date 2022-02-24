@@ -1,6 +1,6 @@
 ---
 - name: Adding ssh key to root user
-  hosts: linuxfondation
+  hosts: all
   remote_user: admin
 
   tasks:
@@ -8,11 +8,8 @@
       command: sudo cp /home/admin/.ssh/authorized_keys /root/.ssh/authorized_keys
 
 - name: Configuring the server using root login
-  hosts: linuxfondation
+  hosts: all
   remote_user: root
-  vars:
-    swap_file_path: "/opt/swapfile"
-    swap_file_size_mb: 1024
 
   tasks:
     - name: Updating and upgrading packages ...
@@ -20,7 +17,7 @@
         upgrade: yes
         update_cache: yes
 
-    - name: Install packages ...
+    - name: Install packages (python3, docker.io ...) ...
       apt:
         update_cache: yes
         name:
@@ -47,32 +44,6 @@
       user:
         name: root
         password: "{{ password_hash.stdout_lines[-1] }}"
-
-    - name: Add Kubernetes apt key
-      ansible.builtin.apt_key:
-        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
-
-    - name: Add kubernetes repo
-      ansible.builtin.apt_repository:
-        repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
-        filename: kubernetes
-
-    - name: Update & install kubernetes ...
-      apt:
-        update_cache: yes
-        name:
-          - kubeadm
-          - kubelet
-          - kubectl
-
-    - name: Get private IP ...
-      shell: ifconfig eth0 | grep "inet " | awk '{ print $2 }'
-      register: cp_ip
-
-    - name: Add to /etc/hosts
-      lineinfile:
-        path: /etc/hosts
-        line: '{{ cp_ip.stdout }} k8scp'
 
     - name: Modifying ssh_config file
       lineinfile:
@@ -116,3 +87,101 @@
     - name: Set TimeZone
       community.general.timezone:
         name: Europe/Paris
+
+
+    - name: Add Kubernetes apt key
+      ansible.builtin.apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+
+    - name: Add kubernetes repo
+      ansible.builtin.apt_repository:
+        repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
+        filename: kubernetes
+
+    - name: Update & install kubernetes ...
+      apt:
+        update_cache: yes
+        name:
+          - kubeadm=1.21.1-00
+          - kubelet=1.21.1-00
+          - kubectl=1.21.1-00
+          - bash-completion
+
+    - name: Prevent kubernetes from being upgraded
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubeadm
+        - kubelet
+        - kubectl
+
+
+##### root@cp
+
+- name: Configuring the CP server using root login
+  hosts: cp
+  remote_user: root
+
+  tasks:
+    - name: Get private IP ...
+      shell: ifconfig | grep inet | awk '{ print $2 }' | tr '\n' ' ' | awk '{ print $2 }'
+      register: cp_ip
+
+    - name: Add private IP to CP /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: '{{ cp_ip.stdout }} k8scp'
+
+    - name: Push the kubeadm config file
+      ansible.builtin.copy:
+        src: ./config/kubeadm-config.yaml
+        dest: /root/kubeadm-config.yaml
+
+    - name: Download calico file from website
+      get_url:
+        url: https://docs.projectcalico.org/manifests/calico.yaml
+        dest: /root/calico.yaml
+
+    - name: Init kubeadm
+      shell: kubeadm init --config=kubeadm-config.yaml --upload-certs | tee kubeadm-init.out
+
+##### admin@cp
+
+- name: Configuring the CP server using admin login
+  hosts: cp
+  remote_user: admin
+
+  tasks:
+    - name: Creating .kube directory ...
+      shell: mkdir -p $HOME/.kube
+    - name: Admin config copy to .kube directory ...
+      shell: sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+    - name: Set .kube directory ...
+      shell: sudo chown $(id -u):$(id -g) $HOME/.kube/config
+    - name: Add auto completion for kubectl
+      shell: echo "source <(kubectl completion bash)" >> $HOME/.bashrc
+    
+    - name: Create new kubeadm token
+      shell: sudo kubeadm token create
+      register: cp_token
+    
+    - name: Generate sha256 ca cert hash
+      shell: openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
+      register: cp_hash
+
+
+##### root@workers
+
+- name: Configuring the workers servers using root login
+  hosts: workers
+  remote_user: root
+
+  tasks:
+    - name: Add private IP to workers /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ hostvars[groups['cp'][0]]['cp_ip']['stdout'] }} k8scp"
+    
+    - name: Make server join the node
+      shell: kubeadm join --token {{ hostvars[groups['cp'][0]]['cp_token']['stdout'] }} k8scp:6443 --discovery-token-ca-cert-hash sha256:{{ hostvars[groups['cp'][0]]['cp_hash'] ['stdout'] }} | tee join.log
