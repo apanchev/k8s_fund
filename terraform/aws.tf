@@ -42,9 +42,9 @@ resource "aws_default_security_group" "ssh_kubernetes" {
   }
   ingress {
     description      = "Kubeadm port"
-    from_port        = 6443
-    to_port          = 6443
-    protocol         = "tcp"
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
     cidr_blocks      = [var.SSH_IP, "10.42.0.0/24"]
   }
   egress {

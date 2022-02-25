@@ -26,6 +26,7 @@
           - htop
           - whois
           - curl
+          - tcpdump
           - docker.io
 
     - name: Install pexpect ...
@@ -45,12 +46,12 @@
         name: root
         password: "{{ password_hash.stdout_lines[-1] }}"
 
-    - name: Modifying ssh_config file
+    - name: Modify ssh_config file
       lineinfile:
         path: /etc/ssh/sshd_config
         line: 'PermitRootLogin without-password'
 
-    - name: Modifying .bashrc file
+    - name: Modify .bashrc file
       lineinfile:
         path: /root/.bashrc
         line: "{{ item }}"
@@ -138,11 +139,6 @@
         src: ./config/kubeadm-config.yaml
         dest: /root/kubeadm-config.yaml
 
-    - name: Download calico file from website
-      get_url:
-        url: https://docs.projectcalico.org/manifests/calico.yaml
-        dest: /root/calico.yaml
-
     - name: Init kubeadm
       shell: kubeadm init --config=kubeadm-config.yaml --upload-certs | tee kubeadm-init.out
 
@@ -153,6 +149,36 @@
   remote_user: admin
 
   tasks:
+    - name: Modify .bashrc file
+      lineinfile:
+        path: $HOME/.bashrc
+        line: "{{ item }}"
+      loop:
+        - 'alias k="kubectl"'
+        - 'alias l="ls --color=auto"'
+        - 'alias ll="ls -l --color=auto"'
+        - 'alias lll="ls -la --color=auto"'
+
+    - name: Create vim config file
+      command: touch $HOME/.vimrc
+      args:
+        creates: $HOME/.vimrc
+
+    - name: Modify .vimrc file
+      lineinfile:
+        path: $HOME/.vimrc
+        line: "{{ item }}"
+      loop:
+        - "set encoding=utf-8"
+        - "set nu"
+        - "syntax on"
+        - "set cursorline"
+        - "set autoindent"
+        - "set smartindent"
+        - "set list listchars=tab:▸\\ ,trail:·"
+        - "set tabstop=2"
+        - "set shiftwidth=2"
+
     - name: Creating .kube directory ...
       shell: mkdir -p $HOME/.kube
     - name: Admin config copy to .kube directory ...
@@ -161,7 +187,25 @@
       shell: sudo chown $(id -u):$(id -g) $HOME/.kube/config
     - name: Add auto completion for kubectl
       shell: echo "source <(kubectl completion bash)" >> $HOME/.bashrc
-    
+
+    - name: Download calico file from website
+      get_url:
+        url: https://docs.projectcalico.org/manifests/calico.yaml
+        dest: $HOME/calico.yaml
+    - name: Uncomment line 1 in calico file
+      replace:
+        path: $HOME/calico.yaml
+        regexp: '# - name: CALICO_IPV4POOL_CIDR'
+        replace: '- name: CALICO_IPV4POOL_CIDR'
+    - name: Uncomment line 2 in calico file
+      replace:
+        path: $HOME/calico.yaml
+        regexp: '#   value: "192.168.0.0/16"'
+        replace: '  value: "192.168.0.0/16"'
+
+    - name: Apply Calico config to kubernetes
+      shell: kubectl apply -f calico.yaml | tee kubectl_calico.log
+
     - name: Create new kubeadm token
       shell: sudo kubeadm token create
       register: cp_token
