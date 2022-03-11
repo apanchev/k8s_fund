@@ -13,9 +13,9 @@ variable "SSH_KEY" {}
 variable "SSH_IP" {}
 
 variable "instance_count" {
-  description = "Number of EC2 instances in each private subnet"
+  description = "Number of EC2 workers instances to config"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 

@@ -7,6 +7,8 @@
     - name: Adding ssh key to root user
       command: sudo cp /home/admin/.ssh/authorized_keys /root/.ssh/authorized_keys
 
+##### root@all-servers
+
 - name: Configuring the server using root login
   hosts: all
   remote_user: root
@@ -125,6 +127,22 @@
   remote_user: root
 
   tasks:
+    - name: Set a hostname
+      ansible.builtin.hostname:
+        name: cp
+
+    - name: Add new hostname to hosts file
+      replace:
+        path: /etc/hosts
+        regexp: '127.0.0.1 localhost'
+        replace: '127.0.0.1 localhost cp'
+    - name: Make modif persistent in hosts file
+      replace:
+        path: /etc/cloud/templates/hosts.debian.tmpl
+        regexp: '127.0.0.1 localhost'
+        replace: '127.0.0.1 localhost cp'
+
+
     - name: Get private IP ...
       shell: ifconfig | grep inet | awk '{ print $2 }' | tr '\n' ' ' | awk '{ print $2 }'
       register: cp_ip
@@ -132,6 +150,10 @@
     - name: Add private IP to CP /etc/hosts
       lineinfile:
         path: /etc/hosts
+        line: '{{ cp_ip.stdout }} k8scp'
+    - name: Add private IP to CP /etc/hosts
+      lineinfile:
+        path: /etc/cloud/templates/hosts.debian.tmpl
         line: '{{ cp_ip.stdout }} k8scp'
 
     - name: Push the kubeadm config file
@@ -158,6 +180,7 @@
         - 'alias l="ls --color=auto"'
         - 'alias ll="ls -l --color=auto"'
         - 'alias lll="ls -la --color=auto"'
+        - 'complete -F __start_kubectl k'
 
     - name: Create vim config file
       command: touch $HOME/.vimrc
@@ -222,10 +245,25 @@
   remote_user: root
 
   tasks:
+    - name: Set a hostname
+      ansible.builtin.hostname:
+        name: "worker-{{ groups['workers'].index(inventory_hostname) }}"
+
     - name: Add private IP to workers /etc/hosts
       lineinfile:
         path: /etc/hosts
         line: "{{ hostvars[groups['cp'][0]]['cp_ip']['stdout'] }} k8scp"
-    
+
+    - name: Add new hostname to hosts file
+      replace:
+        path: /etc/hosts
+        regexp: '127.0.0.1 localhost'
+        replace: "127.0.0.1 localhost worker-{{ groups['workers'].index(inventory_hostname) }}"
+    - name: Make modif persistent in hosts file
+      replace:
+        path: /etc/cloud/templates/hosts.debian.tmpl
+        regexp: '127.0.0.1 localhost'
+        replace: "127.0.0.1 localhost worker-{{ groups['workers'].index(inventory_hostname) }}"
+
     - name: Make server join the node
       shell: kubeadm join --token {{ hostvars[groups['cp'][0]]['cp_token']['stdout'] }} k8scp:6443 --discovery-token-ca-cert-hash sha256:{{ hostvars[groups['cp'][0]]['cp_hash'] ['stdout'] }} | tee join.log
