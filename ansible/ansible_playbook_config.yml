@@ -30,6 +30,7 @@
           - curl
           - tcpdump
           - docker.io
+          - nfs-common
 
     - name: Install pexpect ...
       pip:
@@ -61,6 +62,7 @@
         - 'alias l="ls --color=auto"'
         - 'alias ll="ls -l --color=auto"'
         - 'alias lll="ls -la --color=auto"'
+        - 'alias watch="watch "'
 
     - name: Create vim config file
       command: touch /root/.vimrc
@@ -164,6 +166,23 @@
     - name: Init kubeadm
       shell: kubeadm init --config=kubeadm-config.yaml --upload-certs | tee kubeadm-init.out
 
+
+    - name: Add Helm apt key
+      ansible.builtin.apt_key:
+        url: https://baltocdn.com/helm/signing.asc
+
+    - name: Add Helm repo
+      ansible.builtin.apt_repository:
+        repo: deb https://baltocdn.com/helm/stable/debian/ all main
+        filename: helm-stable-debian
+
+    - name: Update & install kubernetes ...
+      apt:
+        update_cache: yes
+        name:
+          - helm=3.8.1-1
+
+
 ##### admin@cp
 
 - name: Configuring the CP server using admin login
@@ -180,6 +199,7 @@
         - 'alias l="ls --color=auto"'
         - 'alias ll="ls -l --color=auto"'
         - 'alias lll="ls -la --color=auto"'
+        - 'alias watch="watch "'
         - 'complete -F __start_kubectl k'
 
     - name: Create vim config file
@@ -237,6 +257,8 @@
       shell: openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
       register: cp_hash
 
+    - name: Add user to docker group
+      shell: sudo usermod -aG docker $USER
 
 ##### root@workers
 
